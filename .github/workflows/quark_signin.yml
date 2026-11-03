@@ -30,13 +30,23 @@ jobs:
           path: .cache/quark-signin
           key: quark-signed-${{ steps.date.outputs.today }}
 
-      - name: 今日已完成签到
-        if: steps.cache-success.outputs.cache-hit == 'true'
-        run: echo "今日已全部签到成功，跳过重复执行。"
-
       - name: 检出代码
-        if: steps.cache-success.outputs.cache-hit != 'true'
         uses: actions/checkout@v7
+
+      - name: 今日已完成签到回执
+        if: steps.cache-success.outputs.cache-hit == 'true'
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: ${{ vars.PUSHPLUS_TOPIC }}
+        run: |
+          echo "今日已全部签到成功，跳过重复执行。"
+          python3 pushplus.py \
+            --title "夸克网盘今日已签到 ✅" \
+            --content "本次运行跳过签到（今日已有成功记录）。
+          日期：${{ steps.date.outputs.today }}
+          触发方式：${{ github.event_name }}
+          详情：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            || echo "⚠️ 回执推送失败，已忽略（不影响签到结果）。"
 
       - name: 随机延迟
         if: steps.cache-success.outputs.cache-hit != 'true'
