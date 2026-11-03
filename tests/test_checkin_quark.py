@@ -1,6 +1,7 @@
 import io
 import unittest
 from contextlib import redirect_stdout
+from unittest import mock
 
 from checkIn_Quark import (
     ConfigError,
@@ -9,8 +10,10 @@ from checkIn_Quark import (
     extract_params,
     main,
     parse_account,
+    send,
     split_account_entries,
 )
+from pushplus import PushPlusError
 
 
 class FakeResponse:
@@ -175,6 +178,76 @@ class MainTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             exit_code = main("")
         self.assertEqual(exit_code, 2)
+
+
+class NotificationTests(unittest.TestCase):
+    def test_send_pushes_message_to_wechat(self):
+        notifier = mock.MagicMock()
+        with redirect_stdout(io.StringIO()):
+            result = send("标题", "正文", notifier)
+        self.assertTrue(result)
+        notifier.send.assert_called_once_with("标题", "正文")
+
+    def test_send_failure_does_not_raise(self):
+        notifier = mock.MagicMock()
+        notifier.send.side_effect = PushPlusError("网络错误")
+        with redirect_stdout(io.StringIO()):
+            self.assertFalse(send("标题", "正文", notifier))
+
+    def test_push_failure_keeps_exit_code_zero(self):
+        class StubQuark:
+            def __init__(self, account):
+                self.account = account
+
+            def do_sign(self):
+                return "✅ 签到成功"
+
+        notifier = mock.MagicMock()
+        notifier.send.side_effect = PushPlusError("网络错误")
+        with redirect_stdout(io.StringIO()):
+            exit_code = main(
+                "user=账号;kps=1;sign=1;vcode=1;",
+                quark_factory=StubQuark,
+                notifier=notifier,
+            )
+        self.assertEqual(exit_code, 0)
+
+    def test_failure_title_is_used_when_an_account_fails(self):
+        class StubQuark:
+            def __init__(self, account):
+                self.account = account
+
+            def do_sign(self):
+                raise QuarkAPIError("凭证失效")
+
+        notifier = mock.MagicMock()
+        with redirect_stdout(io.StringIO()):
+            main(
+                "user=坏账号;kps=1;sign=1;vcode=1;",
+                quark_factory=StubQuark,
+                notifier=notifier,
+            )
+        title = notifier.send.call_args[0][0]
+        self.assertIn("失败", title)
+
+    def test_success_title_is_used_when_all_accounts_succeed(self):
+        class StubQuark:
+            def __init__(self, account):
+                self.account = account
+
+            def do_sign(self):
+                return "✅ 签到成功"
+
+        notifier = mock.MagicMock()
+        with redirect_stdout(io.StringIO()):
+            main(
+                "user=好账号;kps=1;sign=1;vcode=1;",
+                quark_factory=StubQuark,
+                notifier=notifier,
+            )
+        title = notifier.send.call_args[0][0]
+        self.assertIn("成功", title)
+        self.assertNotIn("失败", title)
 
 
 if __name__ == "__main__":

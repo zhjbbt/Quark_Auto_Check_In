@@ -63,9 +63,12 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: 执行签到脚本
+        id: signin
         if: steps.cache-success.outputs.cache-hit != 'true'
         env:
           COOKIE_QUARK: ${{ secrets.COOKIE_QUARK }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: ${{ vars.PUSHPLUS_TOPIC }}
         run: python checkIn_Quark.py
 
       - name: 生成今日成功标记
@@ -80,3 +83,17 @@ jobs:
         with:
           path: .cache/quark-signin
           key: quark-signed-${{ steps.date.outputs.today }}
+
+      - name: 失败兜底通知
+        if: failure() && steps.cache-success.outputs.cache-hit != 'true'
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: ${{ vars.PUSHPLUS_TOPIC }}
+        run: |
+          if [ -f .quark-push-sent ]; then
+            echo "签到脚本已推送过结果，跳过兜底通知。"
+            exit 0
+          fi
+          python pushplus.py \
+            --title "夸克网盘签到失败 ❌" \
+            --content "工作流执行失败，请前往 Actions 查看日志：https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"

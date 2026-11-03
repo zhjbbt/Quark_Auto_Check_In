@@ -1,8 +1,8 @@
 # ⭐️ 夸克网盘自动签到
 
-![GitHub stars](https://img.shields.io/github/stars/Liu8Can/Quark_Auot_Check_In) ![GitHub forks](https://img.shields.io/github/forks/Liu8Can/Quark_Auot_Check_In) ![License](https://img.shields.io/github/license/Liu8Can/Quark_Auot_Check_In) ![Last Commit](https://img.shields.io/github/last-commit/Liu8Can/Quark_Auot_Check_In) ![GitHub Actions](https://github.com/Liu8Can/Quark_Auot_Check_In/actions/workflows/quark_signin.yml/badge.svg) ![CI](https://github.com/Liu8Can/Quark_Auot_Check_In/actions/workflows/ci.yml/badge.svg) ![认可linux.do](https://ld.xh.do/ld-badge.svg)
+![GitHub stars](https://img.shields.io/github/stars/zhjbbt/Quark_Auto_Check_In) ![GitHub forks](https://img.shields.io/github/forks/zhjbbt/Quark_Auto_Check_In) ![License](https://img.shields.io/github/license/zhjbbt/Quark_Auto_Check_In) ![Last Commit](https://img.shields.io/github/last-commit/zhjbbt/Quark_Auto_Check_In) ![GitHub Actions](https://github.com/zhjbbt/Quark_Auto_Check_In/actions/workflows/quark_signin.yml/badge.svg) ![CI](https://github.com/zhjbbt/Quark_Auto_Check_In/actions/workflows/ci.yml/badge.svg) ![认可linux.do](https://ld.xh.do/ld-badge.svg)
 
-通过 GitHub Actions 自动完成夸克网盘每日签到并领取空间奖励，支持单账号和多账号。
+通过 GitHub Actions 自动完成夸克网盘每日签到并领取空间奖励，支持单账号和多账号，签到结果可通过 PushPlus 推送到微信。
 
 ## 🚀 功能
 
@@ -11,6 +11,7 @@
 - 多账号逐个执行；某个账号失败不会阻断其他账号。
 - 任何账号失败时工作流返回失败，并保留当天第二次重试机会。
 - 每月在独立的 `heartbeat` 分支生成保活提交，不污染 `main` 历史。
+- **签到结果推送到微信**（PushPlus），成功和失败都会通知。
 
 ## 📋 使用方法
 
@@ -123,9 +124,29 @@ user=账号二; url=https://...;
 user=账号一; url=https://...; && user=账号二; url=https://...;
 ```
 
-### 4. 手动测试
+### 4. 配置微信推送（PushPlus，可选）
+
+签到完成后会把结果推送到你的微信，**成功和失败都会通知**，不用再手动去 GitHub 看日志。
+
+1. 打开 [PushPlus 官网](https://www.pushplus.plus/)，微信扫码登录。
+2. 进入 **个人中心 → 用户令牌**，复制你的 Token。
+3. 回到仓库 **Settings → Secrets and variables → Actions → New repository secret**：
+   - Name：`PUSHPLUS_TOKEN`
+   - Secret：粘贴 PushPlus Token
+
+可选：如果你有多个设备或多个人需要接收通知，可以配置**群组编码**。
+
+- 进入 **Settings → Secrets and variables → Actions → Variables → New repository variable**
+- Name：`PUSHPLUS_TOPIC`
+- Variable：PushPlus 后台创建的群组编码（不填则只推送给 Token 绑定的本人）
+
+> ⚠️ Token 属于敏感凭证，请只保存在仓库 Secret 中，不要提交到代码或公开截图。推送失败不会影响签到本身，签到结果始终以 Actions 日志为准。
+
+### 5. 手动测试
 
 进入 **Actions → 夸克网盘每日签到 → Run workflow**。第一次运行会真实请求签到接口；当天全部账号已经成功后，再次运行将显示“今日已全部签到成功，跳过重复执行”。
+
+如果配置了 `PUSHPLUS_TOKEN`，运行结束后微信会收到一条包含每个账号签到结果的汇总消息。
 
 ## 🔁 执行与重试逻辑
 
@@ -156,6 +177,31 @@ GitHub Actions 的计划任务可能延迟数分钟到数十分钟，这是平�
 ### 保活分支为什么每月被强制更新
 
 `heartbeat` 是专门的孤儿分支，每月仅保留最新一条空提交，用于避免长期无活动的 Fork 被 GitHub 自动停用定时任务；它不会改动 `main`。
+
+### 没有收到微信通知
+
+按顺序检查：
+
+1. 仓库 **Settings → Secrets and variables → Actions** 里是否存在 `PUSHPLUS_TOKEN`（注意是 Secret 不是 Variable）。
+2. Action 日志里搜索「微信推送」，会明确显示是「跳过微信推送」还是「推送失败」以及失败原因。
+3. 常见原因：Token 填错（PushPlus 返回 `code=903 用户令牌不正确`）、Token 已过期、网络不通。
+4. 只想推给本人时不要配置 `PUSHPLUS_TOPIC`；配置了群组编码后消息只发到群里。
+
+### 签到成功了，但工作流显示失败
+
+这是兜底通知的正常表现：如果某个账号签到失败，工作流会返回失败以保留当天第二次重试机会，但微信通知里会清楚列出哪个账号失败、原因是什么。
+
+## 📁 项目结构
+
+```text
+checkIn_Quark.py         # 签到主脚本
+pushplus.py              # PushPlus 微信推送模块（仅依赖标准库）
+.github/workflows/
+  quark_signin.yml       # 每日签到 + 失败兜底通知
+  ci.yml                 # 语法检查 + 单元测试
+  empty-commit-keepalive.yml  # 每月分支保活
+tests/                   # 单元测试
+```
 
 ## ⚠️ 注意事项
 

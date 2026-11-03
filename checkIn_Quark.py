@@ -12,15 +12,21 @@ import random
 import re
 import sys
 import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Callable
 from urllib.parse import unquote, urlparse
 
 import requests
 
+from pushplus import PushPlusError, PushPlusNotifier, notifier_from_env
+
 
 INFO_URL = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/info"
 SIGN_URL = "https://drive-m.quark.cn/1/clouddrive/capacity/growth/sign"
 REQUIRED_PARAMS = ("kps", "sign", "vcode")
+PUSHPLUS_URL = "https://www.pushplus.plus/send"
+PUSH_MARKER_FILE = ".quark-push-sent"
 
 
 class ConfigError(ValueError):
@@ -31,10 +37,60 @@ class QuarkAPIError(RuntimeError):
     """Raised when the Quark API cannot complete a sign-in operation."""
 
 
-def send(title: str, message: str) -> None:
-    """Print a notification-compatible summary."""
+def send(
+    title: str,
+    message: str,
+    notifier: PushPlusNotifier | None = None,
+) -> bool:
+    """Print a notification-compatible summary and push it to WeChat.
+
+    A failed push never raises: the sign-in result itself is what matters,
+    and the workflow must not turn red because of a notification problem.
+    """
 
     print(f"{title}:\n{message}")
+
+    if notifier is None:
+        notifier = notifier_from_env()
+    if notifier is None:
+        print("ℹ️ 未配置 PUSHPLUS_TOKEN，跳过微信推送。")
+        _record_push_status("skipped")
+        return False
+
+    try:
+        notifier.send(title, message)
+    except PushPlusError as exc:
+        print(f"⚠️ 微信推送失败：{exc}")
+        _record_push_status("failed")
+        return False
+    print("✅ 微信推送成功。")
+    _record_push_status("sent")
+    return True
+
+
+def _record_push_status(status: str) -> None:
+    """Record the push outcome so the workflow can avoid duplicate messages.
+
+    Two channels are used on purpose:
+
+    * ``GITHUB_OUTPUT`` exposes the status to later steps.
+    * A marker file in the workspace is the reliable source of truth for the
+      fallback step, which runs after the sign-in step has already failed.
+    """
+
+    output_file = os.environ.get("GITHUB_OUTPUT")
+    if output_file:
+        try:
+            with open(output_file, "a", encoding="utf-8") as handle:
+                handle.write(f"push_status={status}\n")
+        except OSError:
+            pass
+
+    if status == "sent":
+        try:
+            Path(PUSH_MARKER_FILE).write_text(status, encoding="utf-8")
+        except OSError:
+            pass
 
 
 def split_account_entries(raw_value: str | None) -> list[str]:
@@ -238,6 +294,7 @@ class Quark:
 def main(
     cookie_value: str | None = None,
     quark_factory: Callable[[dict[str, str]], Quark] | None = None,
+    notifier: PushPlusNotifier | None = None,
 ) -> int:
     """Run every configured account and return a process-compatible exit code."""
 
@@ -250,6 +307,7 @@ def main(
         entries = split_account_entries(cookie_value)
     except ConfigError as exc:
         print(f"❌ {exc}")
+        send("夸克网盘签到失败 ❌", f"❌ 配置错误：{exc}", notifier)
         return 2
 
     print(f"✅ 检测到共 {len(entries)} 个夸克账号\n")
@@ -270,7 +328,8 @@ def main(
             results.append(f"{heading}\n❌ 未知错误：{type(exc).__name__}")
 
     summary = "\n\n".join(results)
-    send("夸克自动签到", summary)
+    title = "夸克网盘签到失败 ❌" if failures else "夸克网盘签到成功 ✅"
+    send(title, summary, notifier)
     print(
         f"\n----------执行完毕：成功 {len(entries) - failures}，失败 {failures}----------"
     )
